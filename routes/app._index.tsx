@@ -46,6 +46,11 @@ export default function Index() {
                     View Akeneo Categories
                   </Link>
                 </Text>
+                <Text variant="bodyMd" as="p">
+                  <Link url="/app/settings" external={false}>
+                    Akeneo Settings
+                  </Link>
+                </Text>
               </BlockStack>
             </Card>
           </Layout.Section>

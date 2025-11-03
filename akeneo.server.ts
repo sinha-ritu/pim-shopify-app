@@ -1,12 +1,25 @@
 
 import { createClient } from '@craftzing/akeneo-api';
+import { authenticate } from './shopify.server';
+import db from './db.server';
 
-const akeneoClient = createClient({
-  url: process.env.AKENEO_BASE_URL!,
-  clientId: process.env.AKENEO_CLIENT_ID!,
-  secret: process.env.AKENEO_CLIENT_SECRET!,
-  username: process.env.AKENEO_USERNAME!,
-  password: process.env.AKENEO_PASSWORD!
-});
+export const getAkeneoClient = async (request: Request) => {
+  const { session } = await authenticate.admin(request);
+  const shopSession = await db.session.findUnique({
+    where: {
+      id: session.id,
+    },
+  });
 
-export { akeneoClient }
+  if (!shopSession || !shopSession.akeneoUrl || !shopSession.akeneoClientId || !shopSession.akeneoClientSecret || !shopSession.akeneoUsername || !shopSession.akeneoPassword) {
+    throw new Response("Akeneo credentials not found", { status: 500 });
+  }
+
+  return createClient({
+    url: shopSession.akeneoUrl,
+    clientId: shopSession.akeneoClientId,
+    secret: shopSession.akeneoClientSecret,
+    username: shopSession.akeneoUsername,
+    password: shopSession.akeneoPassword,
+  });
+};
