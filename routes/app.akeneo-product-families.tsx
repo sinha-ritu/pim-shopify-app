@@ -1,28 +1,34 @@
-import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import {
+  json,
+  type LoaderFunctionArgs,
+  type ActionFunctionArgs,
+} from "@remix-run/node";
+import {
+  Link,
+  useLoaderData,
+  useNavigate,
+  useSubmit,
+  useFetcher,
+} from "@remix-run/react";
 import {
   Page,
   Card,
   BlockStack,
-  List,
   ButtonGroup,
   Button,
-  Text,
+  ResourceList,
 } from "@shopify/polaris";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
+import { ProductFamilyListItem } from "../components/ProductFamilyListItem";
+import { EmptyStateComponent } from "../components/EmptyState";
+import type { Family } from "../models/family.server";
+import { useAppBridge } from "@shopify/app-bridge-react";
+import { useEffect, useState } from "react";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const actionType = formData.get("actionType");
-
-  if (actionType === "bulk") {
-    const families = formData.getAll("families[]").map((fam) => JSON.parse(fam as string));
-    const { admin } = await authenticate.admin(request);
-
-    for (const family of families) {
-      await admin.graphql(
-        `#graphql
+const createProductTypeInShopify = async (admin: any, family: Family) => {
+  const response = await admin.graphql(
+    `#graphql
           mutation CreateProductType($name: String!) {
             productTypeCreate(name: $name) {
               productType {
@@ -35,18 +41,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               }
             }
           }`,
-        {
-          variables: {
-            name: family.code,
-          },
-        }
-      );
+    {
+      variables: {
+        name: family.code,
+      },
+    }
+  );
+
+  const responseJson = await response.json();
+  const errors = responseJson.data?.productTypeCreate?.userErrors;
+
+  if (errors && errors.length > 0) {
+    return { error: errors[0].message };
+  }
+
+  return { success: true };
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const formData = await request.formData();
+  const actionType = formData.get("actionType");
+  const { admin } = await authenticate.admin(request);
+
+  if (actionType === "bulk") {
+    const familiesData = formData.getAll("families[]");
+    if (familiesData.length === 0) {
+      return json({ error: "No families selected" }, { status: 400 });
+    }
+
+    const families: Family[] = familiesData.map((fam) => JSON.parse(fam as string));
+    for (const family of families) {
+      const result = await createProductTypeInShopify(admin, family);
+      if (result.error) {
+        return json({ error: result.error }, { status: 400 });
+      }
     }
 
     return json({ success: true });
   } else {
-    // Handle single family import if needed in the future
-    return json({ error: "Single family import not implemented yet" }, { status: 400 });
+    return json(
+      { error: "Single family import not implemented yet" },
+      { status: 400 }
+    );
   }
 };
 
@@ -58,45 +94,65 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const akeneoClient = await getAkeneoClient(request);
     const productFamilies = await akeneoClient.family.get({
-      query: {page: page, limit: limit}
+      query: { page: page, limit: limit },
     });
-    return json({ productFamilies, page });
-  } catch (error) {
-    console.error('Failed to connect to Akeneo:', error);
-    throw new Response("Failed to connect to Akeneo", { status: 500 });
+
+    const hasNextPage = productFamilies._links?.next?.href ? true : false;
+    const hasPreviousPage = productFamilies._links?.previous?.href ? true : false;
+
+    return json({ productFamilies, page, hasNextPage, hasPreviousPage });
+  } catch (error: any) {
+    throw new Response(error.message, { status: 500 });
   }
 };
 
-import { Checkbox } from "@shopify/polaris";
-import { useState } from "react";
-import { useFetcher } from "@remix-run/react";
-
 export default function AkeneoProductFamilies() {
-  const { productFamilies, page } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
+  const { productFamilies, page, hasNextPage, hasPreviousPage } =
+    useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof action>();
+  const shopify = useAppBridge();
+  const submit = useSubmit();
+  const navigate = useNavigate();
   const [selectedFamilies, setSelectedFamilies] = useState<string[]>([]);
 
-  // @ts-ignore
-  const hasNextPage = productFamilies._links?.next?.href ? true : false;
-  // @ts-ignore
-  const hasPreviousPage = productFamilies._links?.previous?.href ? true : false;
+  useEffect(() => {
+    if (fetcher.data) {
+      if (fetcher.data.success) {
+        shopify.toast.show("Product family created successfully in Shopify");
+      } else if (fetcher.data.error) {
+        shopify.toast.show(fetcher.data.error, { isError: true });
+      }
+    }
+  }, [fetcher.data, shopify]);
 
   const handleBulkImport = () => {
     const formData = new FormData();
     formData.append("actionType", "bulk");
     selectedFamilies.forEach((familyCode) => {
-      const family = productFamilies.items.find((fam: any) => fam.code === familyCode);
+      const family = productFamilies.items.find(
+        (fam: Family) => fam.code === familyCode
+      );
       if (family) {
         formData.append("families[]", JSON.stringify(family));
       }
     });
-    fetcher.submit(formData, { method: "post" });
+    submit(formData, { method: "post" });
+    setSelectedFamilies([]);
   };
+
+  if (!productFamilies || productFamilies.items.length === 0) {
+    return (
+      <EmptyStateComponent
+        title="No product families found"
+        message="No product families were found in your Akeneo instance."
+      />
+    );
+  }
 
   return (
     <Page
       title="Akeneo Product Families"
-      backAction={{ content: "Home", url: "/app" }}
+      backAction={{ content: "Home", onAction: () => navigate("/app") }}
       primaryAction={{
         content: "Bulk Import",
         onAction: handleBulkImport,
@@ -105,27 +161,14 @@ export default function AkeneoProductFamilies() {
     >
       <BlockStack gap="500">
         <Card>
-          <BlockStack>
-            {productFamilies.items.map((family: any) => (
-              <div key={family.code} style={{ paddingBlock: 'var(--p-space-200)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                  <Checkbox
-                    label={`${family.code} - ${family._links.self.href}`}
-                    checked={selectedFamilies.includes(family.code)}
-                    onChange={(checked) => {
-                      if (checked) {
-                        setSelectedFamilies([...selectedFamilies, family.code]);
-                      } else {
-                        setSelectedFamilies(
-                          selectedFamilies.filter((code) => code !== family.code)
-                        );
-                      }
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </BlockStack>
+          <ResourceList
+            resourceName={{ singular: "family", plural: "families" }}
+            items={productFamilies.items}
+            renderItem={(family: Family) => <ProductFamilyListItem family={family} />}
+            selectedItems={selectedFamilies}
+            onSelectionChange={setSelectedFamilies}
+            selectable
+          />
         </Card>
         <ButtonGroup>
           {hasPreviousPage && (

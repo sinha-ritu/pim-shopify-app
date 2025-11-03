@@ -1,18 +1,30 @@
-import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
-import { Link, useFetcher, useLoaderData } from "@remix-run/react";
+import {
+  json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
+import {
+  Link,
+  useFetcher,
+  useLoaderData,
+  useNavigate,
+  useSubmit,
+} from "@remix-run/react";
 import {
   Page,
   Card,
   BlockStack,
-  List,
   ButtonGroup,
   Button,
-  Text,
+  ResourceList,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
+import { AttributeListItem } from "../components/AttributeListItem";
+import { EmptyStateComponent } from "../components/EmptyState";
+import type { Attribute } from "../models/attribute.server";
 
 const mapAkeneoToShopifyType = (akeneoType: string): string => {
   switch (akeneoType) {
@@ -31,18 +43,13 @@ const mapAkeneoToShopifyType = (akeneoType: string): string => {
   }
 };
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const actionType = formData.get("actionType");
-
-  if (actionType === "bulk") {
-    const attributes = formData.getAll("attributes[]").map((attr) => JSON.parse(attr as string));
-    const { admin } = await authenticate.admin(request);
-
-    for (const attribute of attributes) {
-      const shopifyType = mapAkeneoToShopifyType(attribute.type);
-      await admin.graphql(
-        `#graphql
+const createMetafieldDefinitionInShopify = async (
+  admin: any,
+  attribute: Attribute
+) => {
+  const shopifyType = mapAkeneoToShopifyType(attribute.type);
+  const response = await admin.graphql(
+    `#graphql
           mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {
             metafieldDefinitionCreate(definition: $definition) {
               createdDefinition {
@@ -55,18 +62,48 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               }
             }
           }`,
-        {
-          variables: {
-            definition: {
-              name: attribute.labels?.en_US || attribute.code,
-              namespace: "akeneo",
-              key: attribute.code,
-              type: shopifyType,
-              ownerType: "PRODUCT",
-            },
-          },
-        }
-      );
+    {
+      variables: {
+        definition: {
+          name: attribute.labels?.en_US || attribute.code,
+          namespace: "akeneo",
+          key: attribute.code,
+          type: shopifyType,
+          ownerType: "PRODUCT",
+        },
+      },
+    }
+  );
+
+  const responseJson = await response.json();
+  const errors = responseJson.data?.metafieldDefinitionCreate?.userErrors;
+
+  if (errors && errors.length > 0) {
+    return { error: errors[0].message };
+  }
+
+  return { success: true };
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const formData = await request.formData();
+  const actionType = formData.get("actionType");
+  const { admin } = await authenticate.admin(request);
+
+  if (actionType === "bulk") {
+    const attributesData = formData.getAll("attributes[]");
+    if (attributesData.length === 0) {
+      return json({ error: "No attributes selected" }, { status: 400 });
+    }
+
+    const attributes: Attribute[] = attributesData.map((attr) =>
+      JSON.parse(attr as string)
+    );
+    for (const attribute of attributes) {
+      const result = await createMetafieldDefinitionInShopify(admin, attribute);
+      if (result.error) {
+        return json({ error: result.error }, { status: 400 });
+      }
     }
 
     return json({ success: true });
@@ -79,45 +116,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Missing mandatory information" }, { status: 400 });
     }
 
-    const { admin } = await authenticate.admin(request);
+    const attribute: Attribute = {
+      code: attributeCode,
+      type: attributeType,
+      labels: { en_US: attributeLabel },
+      _links: {},
+    };
 
-    const shopifyType = mapAkeneoToShopifyType(attributeType);
-
-    const response = await admin.graphql(
-      `#graphql
-    mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {
-      metafieldDefinitionCreate(definition: $definition) {
-        createdDefinition {
-          id
-        }
-        userErrors {
-          field
-          message
-          code
-        }
-      }
-    }`,
-      {
-        variables: {
-          definition: {
-            name: attributeLabel,
-            namespace: "akeneo",
-            key: attributeCode,
-            type: shopifyType,
-            ownerType: "PRODUCT",
-          },
-        },
-      }
-    );
-
-    const responseJson = await response.json();
-    const errors = responseJson.data?.metafieldDefinitionCreate?.userErrors;
-
-    if (errors && errors.length > 0) {
-      return json({ error: errors[0].message }, { status: 400 });
-    }
-
-    return json({ success: true });
+    return json(await createMetafieldDefinitionInShopify(admin, attribute));
   }
 };
 
@@ -131,20 +137,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const attributes = await akeneoClient.attribute.get({
       query: { page: page, limit: limit },
     });
-    return json({ attributes, page });
-  } catch (error) {
-    console.error('Failed to connect to Akeneo:', error);
-    throw new Response("Failed to connect to Akeneo", { status: 500 });
+
+    const hasNextPage = attributes._links?.next?.href ? true : false;
+    const hasPreviousPage = attributes._links?.previous?.href ? true : false;
+
+    return json({ attributes, page, hasNextPage, hasPreviousPage });
+  } catch (error: any) {
+    throw new Response(error.message, { status: 500 });
   }
 };
 
-import { Checkbox } from "@shopify/polaris";
-import { useState } from "react";
-
 export default function AkeneoAttributes() {
-  const { attributes, page } = useLoaderData<typeof loader>();
+  const { attributes, page, hasNextPage, hasPreviousPage } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
+  const submit = useSubmit();
+  const navigate = useNavigate();
   const [selectedAttributes, setSelectedAttributes] = useState<string[]>([]);
 
   useEffect(() => {
@@ -157,27 +166,34 @@ export default function AkeneoAttributes() {
     }
   }, [fetcher.data, shopify]);
 
-  // @ts-ignore
-  const hasNextPage = attributes._links?.next?.href ? true : false;
-  // @ts-ignore
-  const hasPreviousPage = attributes._links?.previous?.href ? true : false;
-
   const handleBulkImport = () => {
     const formData = new FormData();
     formData.append("actionType", "bulk");
     selectedAttributes.forEach((attributeCode) => {
-      const attribute = attributes.items.find((attr: any) => attr.code === attributeCode);
+      const attribute = attributes.items.find(
+        (attr: Attribute) => attr.code === attributeCode
+      );
       if (attribute) {
         formData.append("attributes[]", JSON.stringify(attribute));
       }
     });
-    fetcher.submit(formData, { method: "post" });
+    submit(formData, { method: "post" });
+    setSelectedAttributes([]);
   };
+
+  if (!attributes || attributes.items.length === 0) {
+    return (
+      <EmptyStateComponent
+        title="No attributes found"
+        message="No attributes were found in your Akeneo instance."
+      />
+    );
+  }
 
   return (
     <Page
       title="Akeneo Attributes"
-      backAction={{ content: "Home", url: "/app" }}
+      backAction={{ content: "Home", onAction: () => navigate("/app") }}
       primaryAction={{
         content: "Bulk Import",
         onAction: handleBulkImport,
@@ -186,35 +202,16 @@ export default function AkeneoAttributes() {
     >
       <BlockStack gap="500">
         <Card>
-          <BlockStack>
-            {attributes.items.map((attribute: any) => (
-              <div key={attribute.code} style={{ paddingBlock: 'var(--p-space-200)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                  <Checkbox
-                    label={`${attribute.code} - ${attribute.type}`}
-                    checked={selectedAttributes.includes(attribute.code)}
-                    onChange={(checked) => {
-                      if (checked) {
-                        setSelectedAttributes([...selectedAttributes, attribute.code]);
-                      } else {
-                        setSelectedAttributes(
-                          selectedAttributes.filter((code) => code !== attribute.code)
-                        );
-                      }
-                    }}
-                  />
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="attributeCode" value={attribute.code} />
-                    <input type="hidden" name="attributeType" value={attribute.type} />
-                    <input type="hidden" name="attributeLabel" value={attribute.labels?.en_US || attribute.code} />
-                    <Button submit loading={fetcher.state === "submitting"}>
-                      Create in Shopify
-                    </Button>
-                  </fetcher.Form>
-                </div>
-              </div>
-            ))}
-          </BlockStack>
+          <ResourceList
+            resourceName={{ singular: "attribute", plural: "attributes" }}
+            items={attributes.items}
+            renderItem={(attribute: Attribute) => (
+              <AttributeListItem attribute={attribute} />
+            )}
+            selectedItems={selectedAttributes}
+            onSelectionChange={setSelectedAttributes}
+            selectable
+          />
         </Card>
         <ButtonGroup>
           {hasPreviousPage && (

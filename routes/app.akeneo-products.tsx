@@ -1,30 +1,37 @@
-import { json, type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
-import { Link, useFetcher, useLoaderData } from "@remix-run/react";
+import {
+  json,
+  type ActionFunctionArgs,
+  type LoaderFunctionArgs,
+} from "@remix-run/node";
+import {
+  Link,
+  useFetcher,
+  useLoaderData,
+  useNavigate,
+  useSubmit,
+} from "@remix-run/react";
 import {
   Page,
   Card,
   BlockStack,
-  List,
   ButtonGroup,
   Button,
-  Text,
+  ResourceList,
 } from "@shopify/polaris";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
+import { ProductListItem } from "../components/ProductListItem";
+import { EmptyStateComponent } from "../components/EmptyState";
+import type { Product } from "../models/product.server";
 
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const formData = await request.formData();
-  const actionType = formData.get("actionType");
-
-  if (actionType === "bulk") {
-    const products = formData.getAll("products[]").map((prod) => JSON.parse(prod as string));
-    const { admin } = await authenticate.admin(request);
-
-    for (const product of products) {
-      await admin.graphql(
-        `#graphql
+const createProductInShopify = async (
+  admin: any,
+  product: Product
+) => {
+  const response = await admin.graphql(
+    `#graphql
           mutation populateProduct($input: ProductInput!) {
             productCreate(input: $input) {
               product {
@@ -36,15 +43,43 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               }
             }
           }`,
-        {
-          variables: {
-            input: {
-              title: product.values?.name?.[0]?.data || product.identifier,
-              handle: product.identifier,
-            },
-          },
-        }
-      );
+    {
+      variables: {
+        input: {
+          title: product.values?.name?.[0]?.data || product.identifier,
+          handle: product.identifier,
+        },
+      },
+    }
+  );
+
+  const responseJson = await response.json();
+  const errors = responseJson.data?.productCreate?.userErrors;
+
+  if (errors && errors.length > 0) {
+    return { error: errors[0].message };
+  }
+
+  return { success: true };
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const formData = await request.formData();
+  const actionType = formData.get("actionType");
+  const { admin } = await authenticate.admin(request);
+
+  if (actionType === "bulk") {
+    const productsData = formData.getAll("products[]");
+    if (productsData.length === 0) {
+      return json({ error: "No products selected" }, { status: 400 });
+    }
+
+    const products: Product[] = productsData.map((prod) => JSON.parse(prod as string));
+    for (const product of products) {
+      const result = await createProductInShopify(admin, product);
+      if (result.error) {
+        return json({ error: result.error }, { status: 400 });
+      }
     }
 
     return json({ success: true });
@@ -56,39 +91,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ error: "Missing mandatory information" }, { status: 400 });
     }
 
-    const { admin } = await authenticate.admin(request);
+    const product: Product = {
+      identifier: productIdentifier,
+      values: { name: [{ data: productName, locale: "", scope: "" }] },
+      _links: {},
+    };
 
-    const response = await admin.graphql(
-      `#graphql
-      mutation populateProduct($input: ProductInput!) {
-        productCreate(input: $input) {
-          product {
-            id
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }`,
-      {
-        variables: {
-          input: {
-            title: productName,
-            handle: productIdentifier,
-          },
-        },
-      }
-    );
-
-    const responseJson = await response.json();
-    const errors = responseJson.data?.productCreate?.userErrors;
-
-    if (errors && errors.length > 0) {
-      return json({ error: errors[0].message }, { status: 400 });
-    }
-
-    return json({ success: true });
+    return json(await createProductInShopify(admin, product));
   }
 };
 
@@ -96,26 +105,39 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   const page = parseInt(url.searchParams.get("page") || "1", 10);
   const limit = 10;
+  const category = url.searchParams.get("category");
+
+  if (!category) {
+    return json({ products: null, page, hasNextPage: false, hasPreviousPage: false });
+  }
 
   try {
     const akeneoClient = await getAkeneoClient(request);
     const products = await akeneoClient.product.get({
-      query: { page: page, limit: limit, locales: "nl_NL" },
+      query: {
+        page: page,
+        limit: limit,
+        locales: "nl_NL",
+        search: `{"categories":[{"operator":"IN","value":["${category}"]}]}`,
+      },
     });
-    return json({ products, page });
-  } catch (error) {
-    console.error('Failed to connect to Akeneo:', error);
-    throw new Response("Failed to connect to Akeneo", { status: 500 });
+
+    const hasNextPage = products._links?.next?.href ? true : false;
+    const hasPreviousPage = products._links?.previous?.href ? true : false;
+
+    return json({ products, page, hasNextPage, hasPreviousPage });
+  } catch (error: any) {
+    console.error("Failed to connect to Akeneo:", error);
+    throw new Response(error.message, { status: 500 });
   }
 };
 
-import { Checkbox } from "@shopify/polaris";
-import { useState } from "react";
-
 export default function AkeneoProducts() {
-  const { products, page } = useLoaderData<typeof loader>();
+  const { products, page, hasNextPage, hasPreviousPage } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
+  const submit = useSubmit();
+  const navigate = useNavigate();
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
 
   useEffect(() => {
@@ -128,27 +150,29 @@ export default function AkeneoProducts() {
     }
   }, [fetcher.data, shopify]);
 
-  // @ts-ignore
-  const hasNextPage = products._links?.next?.href ? true : false;
-  // @ts-ignore
-  const hasPreviousPage = products._links?.previous?.href ? true : false;
-
   const handleBulkImport = () => {
     const formData = new FormData();
     formData.append("actionType", "bulk");
     selectedProducts.forEach((productIdentifier) => {
-      const product = products.items.find((prod: any) => prod.identifier === productIdentifier);
+      const product = products.items.find(
+        (prod: Product) => prod.identifier === productIdentifier
+      );
       if (product) {
         formData.append("products[]", JSON.stringify(product));
       }
     });
-    fetcher.submit(formData, { method: "post" });
+    submit(formData, { method: "post" });
+    setSelectedProducts([]);
   };
+
+  if (!products) {
+    return <EmptyStateComponent title="No category selected" message="Please go back and select a category to view products."/>;
+  }
 
   return (
     <Page
       title="Akeneo Products"
-      backAction={{ content: "Home", url: "/app" }}
+      backAction={{ content: "Home", onAction: () => navigate("/app") }}
       primaryAction={{
         content: "Bulk Import",
         onAction: handleBulkImport,
@@ -157,34 +181,14 @@ export default function AkeneoProducts() {
     >
       <BlockStack gap="500">
         <Card>
-          <BlockStack>
-            {products.items.map((product: any) => (
-              <div key={product.identifier} style={{ paddingBlock: 'var(--p-space-200)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                  <Checkbox
-                    label={`${product.values?.name?.[0]?.data || product.identifier}`}
-                    checked={selectedProducts.includes(product.identifier)}
-                    onChange={(checked) => {
-                      if (checked) {
-                        setSelectedProducts([...selectedProducts, product.identifier]);
-                      } else {
-                        setSelectedProducts(
-                          selectedProducts.filter((id) => id !== product.identifier)
-                        );
-                      }
-                    }}
-                  />
-                  <fetcher.Form method="post">
-                    <input type="hidden" name="productIdentifier" value={product.identifier} />
-                    <input type="hidden" name="productName" value={product.values?.name?.[0]?.data || product.identifier} />
-                    <Button submit loading={fetcher.state === "submitting"}>
-                      Create in Shopify
-                    </Button>
-                  </fetcher.Form>
-                </div>
-              </div>
-            ))}
-          </BlockStack>
+          <ResourceList
+            resourceName={{ singular: "product", plural: "products" }}
+            items={products.items}
+            renderItem={(product: Product) => <ProductListItem product={product} />}
+            selectedItems={selectedProducts}
+            onSelectionChange={setSelectedProducts}
+            selectable
+          />
         </Card>
         <ButtonGroup>
           {hasPreviousPage && (
