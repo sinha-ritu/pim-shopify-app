@@ -26,12 +26,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 const navigationItems = [
   {
-    title: "Products",
-    icon: ProductIcon,
-    url: "/app/akeneo-products",
-    description: "View and import products from Akeneo.",
-  },
-  {
     title: "Categories",
     icon: CategoriesIcon,
     url: "/app/akeneo-categories",
