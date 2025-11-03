@@ -9,7 +9,7 @@ import {
   Icon,
 } from "@shopify/polaris";
 import {
-  ProductsIcon,
+  ProductIcon,
   CategoriesIcon,
   SettingsIcon,
   ProductCostIcon,
@@ -27,7 +27,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 const navigationItems = [
   {
     title: "Products",
-    icon: ProductsIcon,
+    icon: ProductIcon,
     url: "/app/akeneo-products",
     description: "View and import products from Akeneo.",
   },
