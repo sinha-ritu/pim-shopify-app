@@ -1,4 +1,5 @@
 import { EmptyState, Page } from "@shopify/polaris";
+
 type EmptyStateProps = {
   title: string;
   message: string;

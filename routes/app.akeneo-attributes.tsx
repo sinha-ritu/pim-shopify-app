@@ -22,9 +22,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { useEffect, useState } from "react";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
-import { AttributeListItem } from "../components/AttributeListItem";
-import { EmptyStateComponent } from "../components/EmptyState";
-import type { Attribute } from "../models/attribute.server";
+import { AttributeListItem } from "../components/AttributeListItem.tsx";
+import { EmptyStateComponent } from "../components/EmptyState.tsx";
+import type { Attribute } from "../models/attribute.server.ts";
 
 const mapAkeneoToShopifyType = (akeneoType: string): string => {
   switch (akeneoType) {

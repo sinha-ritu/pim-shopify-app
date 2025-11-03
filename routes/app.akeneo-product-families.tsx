@@ -20,9 +20,9 @@ import {
 } from "@shopify/polaris";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
-import { ProductFamilyListItem } from "../components/ProductFamilyListItem";
-import { EmptyStateComponent } from "../components/EmptyState";
-import type { Family } from "../../app/models/family.server";
+import { ProductFamilyListItem } from "../components/ProductFamilyListItem.tsx";
+import { EmptyStateComponent } from "../components/EmptyState.tsx";
+import type { Family } from "../models/family.server.ts";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { useEffect, useState } from "react"; // Added comment to force re-compilation
 

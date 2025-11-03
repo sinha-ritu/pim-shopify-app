@@ -22,9 +22,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { useEffect, useState } from "react";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
-import { ProductListItem } from "../components/ProductListItem";
-import { EmptyStateComponent } from "../components/EmptyState";
-import type { Product } from "../models/product.server";
+import { ProductListItem } from "../components/ProductListItem.tsx";
+import { EmptyStateComponent } from "../components/EmptyState.tsx";
+import type { Product } from "../models/product.server.ts";
 
 const createProductInShopify = async (
   admin: any,

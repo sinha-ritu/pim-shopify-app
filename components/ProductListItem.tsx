@@ -1,5 +1,5 @@
 import { ResourceList, Text, Thumbnail } from "@shopify/polaris";
-import { Product } from "../models/product.server";
+import { Product } from "../models/product.server.ts";
 
 export const ProductListItem = ({ product }: { product: Product }) => {
   const media = (

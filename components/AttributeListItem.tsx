@@ -1,5 +1,5 @@
 import { ResourceList, Text } from "@shopify/polaris";
-import { Attribute } from "../models/attribute.server";
+import { Attribute } from "../models/attribute.server.ts";
 
 export const AttributeListItem = ({ attribute }: { attribute: Attribute }) => {
   return (

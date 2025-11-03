@@ -1,5 +1,5 @@
 import { ResourceList, Text } from "@shopify/polaris";
-import { Category } from "../models/category.server";
+import { Category } from "../models/category.server.ts";
 
 export const CategoryListItem = ({ category }: { category: Category }) => {
   return (

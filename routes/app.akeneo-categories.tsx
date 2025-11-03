@@ -22,9 +22,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { useEffect, useState } from "react";
 import { getAkeneoClient } from "../akeneo.server";
 import { authenticate } from "../shopify.server";
-import { CategoryListItem } from "../components/CategoryListItem";
-import { EmptyStateComponent } from "../components/EmptyState";
-import type { Category } from "../models/category.server";
+import { CategoryListItem } from "../components/CategoryListItem.tsx";
+import { EmptyStateComponent } from "../components/EmptyState.tsx";
+import type { Category } from "../models/category.server.ts";
 
 const createCollectionInShopify = async (admin: any, category: Category) => {
   const response = await admin.graphql(

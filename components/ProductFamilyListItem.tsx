@@ -1,5 +1,5 @@
 import { ResourceList, Text } from "@shopify/polaris";
-import { Family } from "../models/family.server";
+import { Family } from "../models/family.server.ts";
 
 export const ProductFamilyListItem = ({ family }: { family: Family }) => {
   return (
