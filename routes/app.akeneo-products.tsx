@@ -107,25 +107,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const limit = 10;
   const category = url.searchParams.get("category");
 
-  if (!category) {
-    return json({ products: null, page, hasNextPage: false, hasPreviousPage: false });
+  const query: {
+    page: number;
+    limit: number;
+    locales: string;
+    search?: string;
+  } = {
+    page: page,
+    limit: limit,
+    locales: "nl_NL",
+  };
+
+  if (category) {
+    query.search = `{"categories":[{"operator":"IN","value":["${category}"]}]}`;
   }
 
   try {
     const akeneoClient = await getAkeneoClient(request);
     const products = await akeneoClient.product.get({
-      query: {
-        page: page,
-        limit: limit,
-        locales: "nl_NL",
-        search: `{"categories":[{"operator":"IN","value":["${category}"]}]}`,
-      },
+      query: query,
     });
 
     const hasNextPage = products._links?.next?.href ? true : false;
     const hasPreviousPage = products._links?.previous?.href ? true : false;
 
-    return json({ products, page, hasNextPage, hasPreviousPage });
+    return json({ products, page, hasNextPage, hasPreviousPage, category });
   } catch (error: any) {
     console.error("Failed to connect to Akeneo:", error);
     throw new Response(error.message, { status: 500 });
@@ -133,7 +139,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export default function AkeneoProducts() {
-  const { products, page, hasNextPage, hasPreviousPage } = useLoaderData<typeof loader>();
+  const { products, page, hasNextPage, hasPreviousPage, category } =
+    useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const submit = useSubmit();
@@ -165,9 +172,21 @@ export default function AkeneoProducts() {
     setSelectedProducts([]);
   };
 
-  if (!products) {
-    return <EmptyStateComponent title="No category selected" message="Please go back and select a category to view products."/>;
+  if (!products || products.items.length === 0) {
+    return (
+      <EmptyStateComponent
+        title="No products found"
+        message="No products were found in your Akeneo instance for the selected criteria."
+      />
+    );
   }
+
+  const prevPageLink = `?${category ? `category=${category}&` : ""}page=${
+    page - 1
+  }`;
+  const nextPageLink = `?${category ? `category=${category}&` : ""}page=${
+    page + 1
+  }`;
 
   return (
     <Page
@@ -184,7 +203,9 @@ export default function AkeneoProducts() {
           <ResourceList
             resourceName={{ singular: "product", plural: "products" }}
             items={products.items}
-            renderItem={(product: Product) => <ProductListItem product={product} />}
+            renderItem={(product: Product) => (
+              <ProductListItem product={product} />
+            )}
             selectedItems={selectedProducts}
             onSelectionChange={setSelectedProducts}
             selectable
@@ -192,12 +213,12 @@ export default function AkeneoProducts() {
         </Card>
         <ButtonGroup>
           {hasPreviousPage && (
-            <Link to={`?page=${page - 1}`}>
+            <Link to={prevPageLink}>
               <Button>Previous</Button>
             </Link>
           )}
           {hasNextPage && (
-            <Link to={`?page=${page + 1}`}>
+            <Link to={nextPageLink}>
               <Button>Next</Button>
             </Link>
           )}

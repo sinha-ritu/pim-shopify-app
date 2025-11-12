@@ -123,6 +123,21 @@ export default function SettingsPage() {
             </BlockStack>
           </Card>
         </Layout.Section>
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h2" variant="headingMd">
+                Sync Settings
+              </Text>
+              <TextField
+                label="Sync Interval (hours)"
+                value="2"
+                disabled
+                autoComplete="off"
+              />
+            </BlockStack>
+          </Card>
+        </Layout.Section>
       </Layout>
     </Page>
   );
